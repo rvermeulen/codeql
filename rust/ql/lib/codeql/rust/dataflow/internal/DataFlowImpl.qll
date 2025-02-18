@@ -9,6 +9,7 @@ private import codeql.dataflow.internal.DataFlowImpl
 private import rust
 private import SsaImpl as SsaImpl
 private import codeql.rust.controlflow.internal.Scope as Scope
+private import codeql.rust.elements.internal.PathResolution
 private import codeql.rust.controlflow.ControlFlowGraph
 private import codeql.rust.controlflow.CfgNodes
 private import codeql.rust.dataflow.Ssa
@@ -120,12 +121,30 @@ final class ParameterPosition extends TParameterPosition {
   }
 }
 
+/** Holds if `call` invokes a qualified path that resolves to a method. */
+private predicate callToMethod(CallExpr call) {
+  exists(Path path |
+    path = call.getFunction().(PathExpr).getPath() and
+    path.hasQualifier() and
+    resolvePath(path).(Function).getParamList().hasSelfParam()
+  )
+}
+
 /** Holds if `arg` is an argument of `call` at the position `pos`. */
 private predicate isArgumentForCall(ExprCfgNode arg, CallExprBaseCfgNode call, ParameterPosition pos) {
-  arg = call.getArgument(pos.getPosition())
-  or
-  // The self argument in a method call.
-  arg = call.(MethodCallExprCfgNode).getReceiver() and pos.isSelf()
+  if callToMethod(call.(CallExprCfgNode).getCallExpr())
+  then (
+    // The first argument is for the `self` parameter
+    arg = call.getArgument(0) and pos.isSelf()
+    or
+    // Succeeding arguments are shifted left
+    arg = call.getArgument(pos.getPosition() + 1)
+  ) else (
+    // The self argument in a method call.
+    arg = call.(MethodCallExprCfgNode).getReceiver() and pos.isSelf()
+    or
+    arg = call.getArgument(pos.getPosition())
+  )
 }
 
 /**
@@ -844,6 +863,15 @@ final class ElementContent extends Content, TElementContent {
 }
 
 /**
+ * A value that a future resolves to.
+ */
+final class FutureContent extends Content, TFutureContent {
+  override string toString() { result = "future" }
+
+  override Location getLocation() { result instanceof EmptyLocation }
+}
+
+/**
  * Content stored at a position in a tuple.
  *
  * NOTE: Unlike `struct`s and `enum`s tuples are structural and not nominal,
@@ -1194,6 +1222,12 @@ module RustDataFlow implements InputSig<Location> {
         c instanceof FunctionCallReturnContent
       )
       or
+      exists(AwaitExprCfgNode await |
+        c instanceof FutureContent and
+        node1.asExpr() = await.getExpr() and
+        node2.asExpr() = await
+      )
+      or
       VariableCapture::readStep(node1, c, node2)
     )
     or
@@ -1208,6 +1242,17 @@ module RustDataFlow implements InputSig<Location> {
       node1.asExpr() = assignment.getRhs() and
       node2.asExpr() = access.getExpr() and
       access = c.getAnAccess()
+    )
+  }
+
+  pragma[nomagic]
+  private predicate referenceAssignment(Node node1, Node node2, ReferenceContent c) {
+    exists(AssignmentExprCfgNode assignment, PrefixExprCfgNode deref |
+      assignment.getLhs() = deref and
+      deref.getOperatorName() = "*" and
+      node1.asExpr() = assignment.getRhs() and
+      node2.asExpr() = deref.getExpr() and
+      exists(c)
     )
   }
 
@@ -1241,6 +1286,8 @@ module RustDataFlow implements InputSig<Location> {
       ]
     or
     fieldAssignment(node1, node2.(PostUpdateNode).getPreUpdateNode(), c)
+    or
+    referenceAssignment(node1, node2.(PostUpdateNode).getPreUpdateNode(), c)
     or
     exists(AssignmentExprCfgNode assignment, IndexExprCfgNode index |
       c instanceof ElementContent and
@@ -1284,6 +1331,8 @@ module RustDataFlow implements InputSig<Location> {
    */
   predicate clearsContent(Node n, ContentSet cs) {
     fieldAssignment(_, n, cs.(SingletonContentSet).getContent())
+    or
+    referenceAssignment(_, n, cs.(SingletonContentSet).getContent())
     or
     FlowSummaryImpl::Private::Steps::summaryClearsContent(n.(Node::FlowSummaryNode).getSummaryNode(),
       cs)
@@ -1538,7 +1587,8 @@ private module Cached {
         [
           any(IndexExprCfgNode i).getBase(), any(FieldExprCfgNode access).getExpr(),
           any(TryExprCfgNode try).getExpr(),
-          any(PrefixExprCfgNode pe | pe.getOperatorName() = "*").getExpr()
+          any(PrefixExprCfgNode pe | pe.getOperatorName() = "*").getExpr(),
+          any(AwaitExprCfgNode a).getExpr()
         ]
     } or
     TSsaNode(SsaImpl::DataFlowIntegration::SsaNode node) or
@@ -1594,6 +1644,7 @@ private module Cached {
     // TODO: Remove once library types are extracted
     TVariantInLibTupleFieldContent(VariantInLib::VariantInLib v, int pos) { pos = v.getAPosition() } or
     TElementContent() or
+    TFutureContent() or
     TTuplePositionContent(int pos) {
       pos in [0 .. max([
                 any(TuplePat pat).getNumberOfFields(),
