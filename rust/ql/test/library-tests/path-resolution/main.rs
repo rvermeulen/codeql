@@ -178,17 +178,17 @@ mod m8 {
     pub fn g() {
         let x = MyStruct {}; // $ item=I50
         MyTrait::f(&x); // $ item=I48
-        MyStruct::f(&x); // $ MISSING: item=I53
+        MyStruct::f(&x); // $ item=I53
         <MyStruct as // $ item=I50
-         MyTrait // $ MISSING: item=I47
+         MyTrait // $ item=I47
         > // $ MISSING: item=52
         ::f(&x); // $ MISSING: item=I53
         let x = MyStruct {}; // $ item=I50
-        x.f(); // $ MISSING: item=I53
+        x.f(); // $ item=I53
         let x = MyStruct {}; // $ item=I50
-        x.g(); // $ MISSING: item=I54
-        MyStruct::h(&x); // $ MISSING: item=I74
-        x.h(); // $ MISSING: item=I74
+        x.g(); // $ item=I54
+        MyStruct::h(&x); // $ item=I74
+        x.h(); // $ item=I74
     } // I55
 } // I46
 
@@ -291,6 +291,332 @@ mod m13 {
     }
 }
 
+mod m15 {
+    trait Trait1 {
+        fn f(&self);
+
+        fn g(&self); // I80
+    } // I79
+
+    #[rustfmt::skip]
+    trait Trait2
+      : Trait1 { // $ item=I79
+        fn f(&self) {
+            println!("m15::Trait2::f");
+            Self::g(self); // $ item=I80
+            self.g(); // $ item=I80
+        }
+    } // I82
+
+    struct S; // I81
+
+    #[rustfmt::skip]
+    impl Trait1 // $ item=I79
+      for S { // $ item=I81
+        fn f(&self) {
+            println!("m15::<S as Trait1>::f");
+            Self::g(self); // $ item=I77
+            self.g(); // $ item=I77
+        } // I76
+
+        fn g(&self) {
+            println!("m15::<S as Trait1>::g");
+        } // I77
+    }
+
+    #[rustfmt::skip]
+    impl Trait2 // $ item=I82
+      for S { // $ item=I81
+        fn f(&self) {
+            println!("m15::<S as Trait2>::f");
+        } // I78
+    }
+
+    #[rustfmt::skip]
+    pub fn f() {
+        println!("m15::f");
+        let x = S; // $ item=I81
+        <S // $ item=I81
+          as Trait1 // $ item=I79
+        >::f(&x); // $ MISSING: item=I76
+        <S // $ item=I81
+          as Trait2 // $ item=I82
+        >::f(&x); // $ MISSING: item=I78
+        S::g(&x); // $ item=I77
+        x.g(); // $ item=I77
+    } // I75
+}
+
+mod m16 {
+    #[rustfmt::skip]
+    trait Trait1<
+      T // I84
+    > {
+        fn f(&self) -> T; // $ item=I84
+
+        fn g(&self) -> T // $ item=I84
+        ; // I85
+
+        fn h(&self) -> T { // $ item=I84
+            Self::g(&self); // $ item=I85
+            self.g() // $ item=I85
+        } // I96
+
+        const c: T // $ item=I84
+        ; // I94
+    } // I86
+
+    #[rustfmt::skip]
+    trait Trait2<
+      T // I87
+    > // I88
+      : Trait1<
+          T // $ item=I87
+        > { // $ item=I86
+        fn f(&self) -> T { // $ item=I87
+            println!("m16::Trait2::f");
+            Self::g(self); // $ item=I85
+            self.g(); // $ item=I85
+            Self::c // $ item=I94
+        }
+    } // I89
+
+    struct S; // I90
+
+    #[rustfmt::skip]
+    impl Trait1<
+      S // $ item=I90
+    > // $ item=I86
+      for S { // $ item=I90
+        fn f(&self) -> S { // $ item=I90
+            println!("m16::<S as Trait1<S>>::f");
+            Self::g(self); // $ item=I92
+            self.g() // $ item=I92
+        } // I91
+
+        fn g(&self) -> S { // $ item=I90
+            println!("m16::<S as Trait1<S>>::g");
+            Self::c // $ item=I95
+        } // I92
+
+        const c: S = S // $ item=I90
+        ; // I95
+    }
+
+    #[rustfmt::skip]
+    impl Trait2<
+      S // $ item=I90
+    > // $ item=I89
+      for S { // $ item=I90
+        fn f(&self) -> S { // $ item=I90
+            println!("m16::<S as Trait2<S>>::f");
+            Self::c // $ MISSING: item=I95
+        } // I93
+    }
+
+    #[rustfmt::skip]
+    pub fn f() {
+        println!("m16::f");
+        let x = S; // $ item=I90
+        <S // $ item=I90
+          as Trait1<
+            S // $ item=I90
+          > // $ item=I86
+        >::f(&x); // $ MISSING: item=I91
+        <S // $ item=I90
+          as Trait2<
+            S // $ item=I90
+          > // $ item=I89
+        >::f(&x); // $ MISSING: item=I93
+        S::g(&x); // $ item=I92
+        x.g(); // $ item=I92
+        S::h(&x); // $ item=I96
+        x.h(); // $ item=I96
+        S::c; // $ item=I95
+        <S // $ item=I90
+          as Trait1<
+            S // $ item=I90
+          > // $ item=I86
+        >::c; // $ MISSING: item=I95
+    } // I83
+}
+
+mod m17 {
+    trait MyTrait {
+        fn f(&self); // I1
+    } // I2
+
+    struct S; // I3
+
+    #[rustfmt::skip]
+    impl MyTrait // $ item=I2
+    for S { // $ item=I3
+        fn f(&self) {
+            println!("M17::MyTrait::f");
+        } // I4
+    }
+
+    #[rustfmt::skip]
+    fn g<T: // I5
+      MyTrait // $ item=I2
+    >(x: T) { // $ item=I5
+        x.f(); // $ item=I1
+        T::f(&x); // $ item=I1
+        MyTrait::f(&x); // $ item=I1
+    } // I6
+
+    #[rustfmt::skip]
+    pub fn f() {
+        g( // $ item=I6
+          S // $ item=I3
+        );
+    } // I99
+}
+
+mod m18 {
+    fn f() {
+        println!("m18::f");
+    } // I101
+
+    pub mod m19 {
+        fn f() {
+            println!("m18::m19::f");
+        } // I102
+
+        pub mod m20 {
+            pub fn g() {
+                println!("m18::m19::m20::g");
+                super::f(); // $ item=I102
+                super::super::f(); // $ item=I101
+            } // I103
+        }
+    }
+}
+
+mod m21 {
+    mod m22 {
+        pub enum MyEnum {
+            A, // I104
+        } // I105
+
+        pub struct MyStruct; // I106
+    } // I107
+
+    mod m33 {
+        #[rustfmt::skip]
+        use super::m22::MyEnum::{ // $ item=I105
+            self // $ item=I105
+        };
+
+        #[rustfmt::skip]
+        use super::m22::MyStruct::{ // $ item=I106
+            self // $ item=I106
+        };
+
+        fn f() {
+            let _ = MyEnum::A; // $ item=I104
+            let _ = MyStruct {}; // $ item=I106
+        }
+    }
+}
+
+mod m23 {
+    #[rustfmt::skip]
+    trait Trait1<
+      T // I1
+    > {
+        fn f(&self); // I3
+    } // I2
+
+    struct S; // I4
+
+    #[rustfmt::skip]
+    impl Trait1<
+      Self // $ item=I4
+    > // $ item=I2
+      for S { // $ item=I4
+        fn f(&self) {
+            println!("m23::<S as Trait1<S>>::f");
+        } // I5
+    }
+
+    #[rustfmt::skip]
+    pub fn f() {
+        let x = S; // $ item=I4
+        x.f(); // $ item=I5
+    } // I108
+}
+
+mod m24 {
+    trait TraitA {
+        fn trait_a_method(&self); // I110
+    } // I111
+
+    trait TraitB {
+        fn trait_b_method(&self); // I112
+    } // I113
+
+    #[rustfmt::skip]
+    struct GenericStruct<T> { // I114
+        data: T, // $ item=I114
+    } // I115
+
+    #[rustfmt::skip]
+    impl<T> // I1151
+        GenericStruct<T> // $ item=I115 item=I1151
+    where
+        T: TraitA // $ item=I111 item=I1151
+    {
+        fn call_trait_a(&self) {
+            self.data.trait_a_method(); // $ item=I110
+        } // I116
+    }
+
+    #[rustfmt::skip]
+    impl<T> // I1161
+        GenericStruct<T> // $ item=I115 item=I1161
+    where
+        T: TraitB, // $ item=I113 item=I1161
+        T: TraitA, // $ item=I111 item=I1161
+    {
+        fn call_both(&self) {
+            self.data.trait_a_method(); // $ item=I110
+            self.data.trait_b_method(); // $ item=I112
+        } // I117
+    }
+
+    struct Implementor; // I118
+
+    #[rustfmt::skip]
+    impl TraitA for Implementor { // $ item=I111 item=I118
+        fn trait_a_method(&self) {
+            println!("TraitA method called");
+        } // I119
+    }
+
+    #[rustfmt::skip]
+    impl TraitB for Implementor { // $ item=I113 item=I118
+        fn trait_b_method(&self) {
+            println!("TraitB method called");
+        } // I120
+    }
+
+    #[rustfmt::skip]
+    pub fn f() {
+        let impl_obj = Implementor; // $ item=I118
+        let generic = GenericStruct { data: impl_obj }; // $ item=I115
+        
+        generic.call_trait_a(); // $ MISSING: item=I116
+        generic.call_both(); // $ MISSING: item=I117
+        
+        // Access through where clause type parameter constraint
+        GenericStruct::<Implementor>::call_trait_a(&generic); // $ item=I116 item=I118
+            
+        // Type that satisfies multiple trait bounds in where clause
+        GenericStruct::<Implementor>::call_both(&generic); // $ item=I117 item=I118
+    } // I121
+}
+
 fn main() {
     my::nested::nested1::nested2::f(); // $ item=I4
     my::f(); // $ item=I38
@@ -310,4 +636,14 @@ fn main() {
     m8::g(); // $ item=I55
     m9::f(); // $ item=I57
     m11::f(); // $ item=I63
+    m15::f(); // $ item=I75
+    m16::f(); // $ item=I83
+    m17::f(); // $ item=I99
+    nested6::f(); // $ item=I116
+    nested8::f(); // $ item=I119
+    my3::f(); // $ item=I200
+    nested_f(); // $ item=I201
+    m18::m19::m20::g(); // $ item=I103
+    m23::f(); // $ item=I108
+    m24::f(); // $ item=I121
 }

@@ -4,23 +4,22 @@ use crate::rust_analyzer::FileSemanticInformation;
 use crate::trap::{DiagnosticSeverity, TrapFile, TrapId};
 use crate::trap::{Label, TrapClass};
 use itertools::Either;
-use ra_ap_base_db::ra_salsa::InternKey;
-use ra_ap_base_db::CrateOrigin;
+use ra_ap_base_db::{CrateOrigin, EditionedFileId};
 use ra_ap_hir::db::ExpandDatabase;
 use ra_ap_hir::{
     Adt, Crate, ItemContainer, Module, ModuleDef, PathResolution, Semantics, Type, Variant,
 };
-use ra_ap_hir_def::type_ref::Mutability;
 use ra_ap_hir_def::ModuleId;
+use ra_ap_hir_def::type_ref::Mutability;
 use ra_ap_hir_expand::ExpandTo;
-use ra_ap_ide_db::line_index::{LineCol, LineIndex};
 use ra_ap_ide_db::RootDatabase;
+use ra_ap_ide_db::line_index::{LineCol, LineIndex};
 use ra_ap_parser::SyntaxKind;
-use ra_ap_span::{EditionedFileId, TextSize};
+use ra_ap_span::TextSize;
 use ra_ap_syntax::ast::HasName;
 use ra_ap_syntax::{
-    ast, AstNode, NodeOrToken, SyntaxElementChildren, SyntaxError, SyntaxNode, SyntaxToken,
-    TextRange,
+    AstNode, NodeOrToken, SyntaxElementChildren, SyntaxError, SyntaxNode, SyntaxToken, TextRange,
+    ast,
 };
 
 #[macro_export]
@@ -53,13 +52,13 @@ macro_rules! emit_detached {
     (PathExpr, $self:ident, $node:ident, $label:ident) => {
         $self.extract_path_canonical_destination(&$node, $label.into());
     };
-    (RecordExpr, $self:ident, $node:ident, $label:ident) => {
+    (StructExpr, $self:ident, $node:ident, $label:ident) => {
         $self.extract_path_canonical_destination(&$node, $label.into());
     };
     (PathPat, $self:ident, $node:ident, $label:ident) => {
         $self.extract_path_canonical_destination(&$node, $label.into());
     };
-    (RecordPat, $self:ident, $node:ident, $label:ident) => {
+    (StructPat, $self:ident, $node:ident, $label:ident) => {
         $self.extract_path_canonical_destination(&$node, $label.into());
     };
     (TupleStructPat, $self:ident, $node:ident, $label:ident) => {
@@ -67,6 +66,9 @@ macro_rules! emit_detached {
     };
     (MethodCallExpr, $self:ident, $node:ident, $label:ident) => {
         $self.extract_method_canonical_destination(&$node, $label);
+    };
+    (PathSegment, $self:ident, $node:ident, $label:ident) => {
+        $self.extract_types_from_path_segment(&$node, $label.into());
     };
     ($($_:tt)*) => {};
 }
@@ -83,6 +85,12 @@ macro_rules! dispatch_to_tracing {
     };
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum ResolvePaths {
+    Yes,
+    No,
+}
+
 pub struct Translator<'a> {
     pub trap: TrapFile,
     path: &'a str,
@@ -90,6 +98,7 @@ pub struct Translator<'a> {
     line_index: LineIndex,
     file_id: Option<EditionedFileId>,
     pub semantics: Option<&'a Semantics<'a, RootDatabase>>,
+    resolve_paths: ResolvePaths,
 }
 
 const UNKNOWN_LOCATION: (LineCol, LineCol) =
@@ -102,6 +111,7 @@ impl<'a> Translator<'a> {
         label: Label<generated::File>,
         line_index: LineIndex,
         semantic_info: Option<&FileSemanticInformation<'a>>,
+        resolve_paths: ResolvePaths,
     ) -> Translator<'a> {
         Translator {
             trap,
@@ -110,6 +120,7 @@ impl<'a> Translator<'a> {
             line_index,
             file_id: semantic_info.map(|i| i.file_id),
             semantics: semantic_info.map(|i| i.semantics),
+            resolve_paths,
         }
     }
     fn location(&self, range: TextRange) -> Option<(LineCol, LineCol)> {
@@ -136,7 +147,7 @@ impl<'a> Translator<'a> {
         if let Some(semantics) = self.semantics.as_ref() {
             let file_range = semantics.original_range(node.syntax());
             let file_id = self.file_id?;
-            if file_id == file_range.file_id {
+            if file_id.file_id(semantics.db) == file_range.file_id {
                 Some(file_range.range)
             } else {
                 None
@@ -387,9 +398,9 @@ impl<'a> Translator<'a> {
     }
 
     fn canonical_path_from_hir_module(&self, item: Module) -> Option<String> {
-        if let Some(block_id) = ModuleId::from(item).containing_block() {
-            // this means this is a block module, i.e. a virtual module for a block scope
-            return Some(format!("{{{}}}", block_id.as_intern_id()));
+        if ModuleId::from(item).containing_block().is_some() {
+            // this means this is a block module, i.e. a virtual module for an anonymous block scope
+            return None;
         }
         if item.is_crate_root() {
             return Some("crate".into());
@@ -414,7 +425,7 @@ impl<'a> Translator<'a> {
                 }
             }
             ItemContainer::Module(it) => self.canonical_path_from_hir_module(it),
-            ItemContainer::ExternBlock() | ItemContainer::Crate(_) => Some("".to_owned()),
+            ItemContainer::ExternBlock(..) | ItemContainer::Crate(..) => Some("".to_owned()),
         }?;
         Some(format!("{prefix}::{name}"))
     }
@@ -497,6 +508,9 @@ impl<'a> Translator<'a> {
         item: &T,
         label: Label<generated::Addressable>,
     ) {
+        if self.resolve_paths == ResolvePaths::No {
+            return;
+        }
         (|| {
             let sema = self.semantics.as_ref()?;
             let def = T::Hir::try_from_source(item, sema)?;
@@ -517,6 +531,9 @@ impl<'a> Translator<'a> {
         item: &ast::Variant,
         label: Label<generated::Variant>,
     ) {
+        if self.resolve_paths == ResolvePaths::No {
+            return;
+        }
         (|| {
             let sema = self.semantics.as_ref()?;
             let def = sema.to_enum_variant_def(item)?;
@@ -537,6 +554,9 @@ impl<'a> Translator<'a> {
         item: &impl PathAst,
         label: Label<generated::Resolvable>,
     ) {
+        if self.resolve_paths == ResolvePaths::No {
+            return;
+        }
         (|| {
             let path = item.path()?;
             let sema = self.semantics.as_ref()?;
@@ -557,6 +577,9 @@ impl<'a> Translator<'a> {
         item: &ast::MethodCallExpr,
         label: Label<generated::MethodCallExpr>,
     ) {
+        if self.resolve_paths == ResolvePaths::No {
+            return;
+        }
         (|| {
             let sema = self.semantics.as_ref()?;
             let resolved = sema.resolve_method_call_fallback(item)?;
@@ -583,5 +606,37 @@ impl<'a> Translator<'a> {
                 })
             })
         })
+    }
+
+    pub(crate) fn extract_types_from_path_segment(
+        &mut self,
+        item: &ast::PathSegment,
+        label: Label<generated::PathSegment>,
+    ) {
+        // work around a bug in rust-analyzer AST generation machinery
+        // this code was inspired by rust-analyzer's own workaround for this:
+        // https://github.com/rust-lang/rust-analyzer/blob/1f86729f29ea50e8491a1516422df4fd3d1277b0/crates/syntax/src/ast/node_ext.rs#L268-L277
+        if item.l_angle_token().is_some() {
+            // <T> or <T as Trait>
+            // T is any TypeRef, Trait has to be a PathType
+            let mut type_refs = item
+                .syntax()
+                .children()
+                .filter(|node| ast::Type::can_cast(node.kind()));
+            if let Some(t) = type_refs
+                .next()
+                .and_then(ast::Type::cast)
+                .and_then(|t| self.emit_type(t))
+            {
+                generated::PathSegment::emit_type_repr(label, t, &mut self.trap.writer)
+            }
+            if let Some(t) = type_refs
+                .next()
+                .and_then(ast::PathType::cast)
+                .and_then(|t| self.emit_path_type(t))
+            {
+                generated::PathSegment::emit_trait_type_repr(label, t, &mut self.trap.writer)
+            }
+        }
     }
 }

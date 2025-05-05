@@ -9,13 +9,18 @@ final class CloneCallable extends SummarizedCallable::Range {
     // NOTE: The function target may not exist in the database, so we base this
     // on method calls.
     exists(MethodCallExpr c |
-      c.getNameRef().getText() = "clone" and
+      c.getIdentifier().getText() = "clone" and
       c.getArgList().getNumberOfArgs() = 0 and
       this = c.getResolvedCrateOrigin() + "::_::" + c.getResolvedPath()
     )
   }
 
-  final override predicate propagatesFlow(string input, string output, boolean preservesValue) {
-    input = "Argument[self]" and output = "ReturnValue" and preservesValue = true
+  final override predicate propagatesFlow(
+    string input, string output, boolean preservesValue, string model
+  ) {
+    input = "Argument[self].Reference" and
+    output = "ReturnValue" and
+    preservesValue = true and
+    model = "generated"
   }
 }

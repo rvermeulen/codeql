@@ -1,3 +1,31 @@
+## 5.1.5
+
+### Minor Analysis Improvements
+
+* Improved autobuilder logic for detecting whether a project references a SDK (and should be built using `dotnet`).
+
+## 5.1.4
+
+### Minor Analysis Improvements
+
+* The *alignment* and *format* clauses in string interpolation expressions are now extracted. That is, in `$"Hello {name,align:format}"` *name*, *align* and *format* are extracted as children of the string interpolation *insert* `{name,align:format}`.
+* Blazor support can now better recognize when a property being set is specified with a string literal, rather than referenced in a `nameof` expression.
+
+## 5.1.3
+
+### Minor Analysis Improvements
+
+* The models for `System.Uri` have been modified to better model the flow of tainted URIs.
+* Modeled parameter passing between Blazor parent and child components.
+
+## 5.1.2
+
+No user-facing changes.
+
+## 5.1.1
+
+No user-facing changes.
+
 ## 5.1.0
 
 ### Deprecated APIs
@@ -68,7 +96,6 @@
 
 ### Minor Analysis Improvements
 
-* .NET 9 is now required to build the C# extractor.
 * The Models as Data models for .NET 8 Runtime now include generated models for higher order methods.
 
 ## 3.1.0

@@ -135,7 +135,7 @@ struct Point {
 
 fn struct_field() {
     let p = Point { x: source(9), y: 2 };
-    sink(p.x); // $ MISSING: hasValueFlow=9
+    sink(p.x); // $ hasValueFlow=9
     sink(p.y);
 }
 
@@ -143,7 +143,7 @@ fn struct_mutation() {
     let mut p = Point { x: source(9), y: 2 };
     sink(p.y);
     p.y = source(54);
-    sink(p.y); // $ MISSING: hasValueFlow=54
+    sink(p.y); // $ hasValueFlow=54
 }
 
 fn struct_pattern_match() {
@@ -170,7 +170,7 @@ fn struct_nested_field() {
         z: 4,
     };
     sink(p.plane.x);
-    sink(p.plane.y); // $ MISSING: hasValueFlow=77
+    sink(p.plane.y); // $ hasValueFlow=77
     sink(p.z);
 }
 
@@ -196,7 +196,7 @@ struct MyTupleStruct(i64, i64);
 
 fn tuple_struct() {
     let s = MyTupleStruct(source(94), 2);
-    sink(s.0); // $ MISSING: hasValueFlow=94
+    sink(s.0); // $ hasValueFlow=94
     sink(s.1);
 
     match s {
@@ -264,6 +264,20 @@ fn option_questionmark() -> Option<i64> {
     sink(i1); // $ hasValueFlow=20
     sink(s2?);
     Some(0)
+}
+
+fn option_ok() {
+    let r1 : Result<i64, i64> = Ok(source(21));
+    let o1a : Option<i64> = r1.ok();
+    let o1b : Option<i64> = r1.err();
+    sink(o1a.unwrap()); // $ hasValueFlow=21
+    sink(o1b.unwrap());
+
+    let r2 : Result<i64, i64> = Err(source(22));
+    let o2a : Option<i64> = r2.ok();
+    let o2b : Option<i64> = r2.err();
+    sink(o2a.unwrap());
+    sink(o2b.unwrap()); // $ hasValueFlow=22
 }
 
 fn result_questionmark() -> Result<i64, i64> {
@@ -445,6 +459,59 @@ fn macro_invocation() {
     sink(s); // $ hasValueFlow=37
 }
 
+fn sink_string(s: String) {
+    println!("{}", s);
+}
+
+fn parse() {
+    let a = source(90);
+    let b = a.to_string();
+    let c = b.parse::<i64>().unwrap();
+    let d : i64 = b.parse().unwrap();
+
+    sink(a); // $ hasValueFlow=90
+    sink_string(b); // $ hasTaintFlow=90
+    sink(c); // $ hasTaintFlow=90
+    sink(d); // $ hasTaintFlow=90
+}
+
+fn iterators() {
+    let vs = [source(91), 2, 3, 4];
+
+    sink(vs[0]); // $ hasValueFlow=91
+    sink(*vs.iter().next().unwrap()); // $ MISSING: hasValueFlow=91
+    sink(*vs.iter().nth(0).unwrap()); // $ MISSING: hasValueFlow=91
+
+    for v in vs {
+        sink(v); // $ hasValueFlow=91
+    }
+    for &v in vs.iter() {
+        sink(v); // $ MISSING: hasValueFlow=91
+    }
+
+    let vs2 : Vec<&i64> = vs.iter().collect();
+    for &v in vs2 {
+        sink(v); // $ MISSING: hasValueFlow=91
+    }
+
+    vs.iter().map(|x| sink(*x)); // $ MISSING: hasValueFlow=91
+    vs.iter().for_each(|x| sink(*x)); // $ MISSING: hasValueFlow=91
+
+    for v in vs.into_iter() {
+        sink(v); // $ MISSING: hasValueFlow=91
+    }
+
+    let mut vs_mut = [source(92), 2, 3, 4];
+
+    sink(vs_mut[0]); // $ hasValueFlow=92
+    sink(*vs_mut.iter().next().unwrap()); // $ MISSING: hasValueFlow=92
+    sink(*vs_mut.iter().nth(0).unwrap()); // $ MISSING: hasValueFlow=92
+
+    for &mut v in vs_mut.iter_mut() {
+        sink(v); // $ MISSING: hasValueFlow=92
+    }
+}
+
 fn references() {
     let a = source(40);
     let b = source(41);
@@ -455,6 +522,20 @@ fn references() {
     sink_ref(&b); // $ hasTaintFlow=41
     sink_ref(c_ref); // $ hasTaintFlow=42
     sink(*c_ref); // $ hasValueFlow=42
+}
+
+fn conversions() {
+    let a: i64 = source(50);
+
+    sink(a as i64); // $ hasTaintFlow=50
+    sink(a.into()); // $ MISSING: hasValueFlow=50
+    sink(i64::from(a)); // $ hasValueFlow=50
+
+    let b: i32 = source(51) as i32;
+
+    sink(b as i64); // $ hasTaintFlow=51
+    sink(b.into()); // $ MISSING: hasTaintFlow=51
+    sink(i64::from(b)); // $ hasTaintFlow=51
 }
 
 fn main() {
@@ -480,6 +561,7 @@ fn main() {
     option_unwrap();
     option_unwrap_or();
     option_questionmark();
+    option_ok();
     let _ = result_questionmark();
     custom_tuple_enum_pattern_match_qualified();
     custom_tuple_enum_pattern_match_unqualified();
@@ -494,5 +576,8 @@ fn main() {
     array_assignment();
     captured_variable_and_continue(vec![]);
     macro_invocation();
+    parse();
+    iterators();
     references();
+    conversions();
 }

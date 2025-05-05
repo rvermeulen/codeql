@@ -195,7 +195,7 @@ module Ssa {
       )
       or
       exists(LetStmtCfgNode ls |
-        ls.getPat() = write and
+        ls.getPat().(IdentPatCfgNode).getName() = write and
         ls.getInitializer() = value
       )
     }
@@ -263,7 +263,7 @@ module Ssa {
         not exists(this.getSplitString()) and
         prefix = ""
       |
-        result = prefix + "phi"
+        result = prefix + SsaImpl::PhiDefinition.super.toString()
       )
     }
 
